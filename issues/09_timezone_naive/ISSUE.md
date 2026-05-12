@@ -1,0 +1,1 @@
+`is_in_future(some_aware_datetime)` raises `TypeError: can't compare offset-naive and offset-aware datetimes`. The function uses `datetime.utcnow()` which returns a naive datetime — replace it with a timezone-aware "now in UTC" so comparisons work against the aware datetime the caller passed in.

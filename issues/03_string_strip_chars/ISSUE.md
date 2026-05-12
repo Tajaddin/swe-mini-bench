@@ -1,0 +1,1 @@
+`remove_suffix("hello_world", "world")` returns `"hello_"`, which is correct here, but `remove_suffix("https://example.com", "com")` returns `"https://example."` while `remove_suffix("https://example.com", "https")` returns an empty-ish result. The implementation appears to be using `str.strip` / `str.rstrip` instead of removing the literal suffix.

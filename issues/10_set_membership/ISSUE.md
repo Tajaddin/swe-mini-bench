@@ -1,0 +1,1 @@
+`filter_blocked(events, blocked_ids)` runs in O(n*m) because it does `event_id in blocked_ids` against a list. For our 100k-event traces, this is the hot path. Convert the blocked-id list to a set so membership becomes O(1).

@@ -1,0 +1,1 @@
+`make_multipliers([1, 2, 3])` should return three callables that multiply by 1, 2, and 3 respectively. Instead, all three callables behave like "multiply by 3" (the last loop value). Common late-binding closure bug.

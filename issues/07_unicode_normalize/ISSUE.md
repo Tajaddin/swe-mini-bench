@@ -1,0 +1,1 @@
+`is_same_name("café", "café")` returns False even though both look identical. The first contains the precomposed `é` (U+00E9) while the second contains `e` + combining acute (U+0065 U+0301). The comparator needs to normalise both sides before comparing. Use NFC.

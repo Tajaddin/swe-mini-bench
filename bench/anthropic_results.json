@@ -1,0 +1,251 @@
+{
+  "model": "claude-haiku-4-5-20251001",
+  "issue_ids": [
+    "01_off_by_one_range",
+    "02_mutable_default",
+    "03_string_strip_chars",
+    "04_dict_get_default",
+    "05_int_division",
+    "06_late_binding_closure",
+    "07_unicode_normalize",
+    "08_recursion_base_case",
+    "09_timezone_naive",
+    "10_set_membership"
+  ],
+  "summaries": [
+    {
+      "strategy": "zero_shot",
+      "pass_rate": 1.0,
+      "pass_count": 10,
+      "n": 10,
+      "results": [
+        {
+          "issue_id": "01_off_by_one_range",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "02_mutable_default",
+          "passed": true,
+          "tests_passed": 2,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "03_string_strip_chars",
+          "passed": true,
+          "tests_passed": 4,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "04_dict_get_default",
+          "passed": true,
+          "tests_passed": 2,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "05_int_division",
+          "passed": true,
+          "tests_passed": 4,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "06_late_binding_closure",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "07_unicode_normalize",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "08_recursion_base_case",
+          "passed": true,
+          "tests_passed": 4,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "09_timezone_naive",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "10_set_membership",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        }
+      ]
+    },
+    {
+      "strategy": "scratchpad",
+      "pass_rate": 0.9,
+      "pass_count": 9,
+      "n": 10,
+      "results": [
+        {
+          "issue_id": "01_off_by_one_range",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "02_mutable_default",
+          "passed": true,
+          "tests_passed": 2,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "03_string_strip_chars",
+          "passed": true,
+          "tests_passed": 4,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "04_dict_get_default",
+          "passed": true,
+          "tests_passed": 2,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "05_int_division",
+          "passed": true,
+          "tests_passed": 4,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "06_late_binding_closure",
+          "passed": false,
+          "tests_passed": 0,
+          "tests_failed": 0,
+          "error_kind": "test_failure"
+        },
+        {
+          "issue_id": "07_unicode_normalize",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "08_recursion_base_case",
+          "passed": true,
+          "tests_passed": 4,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "09_timezone_naive",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "10_set_membership",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        }
+      ]
+    },
+    {
+      "strategy": "scratchpad_critique",
+      "pass_rate": 1.0,
+      "pass_count": 10,
+      "n": 10,
+      "results": [
+        {
+          "issue_id": "01_off_by_one_range",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "02_mutable_default",
+          "passed": true,
+          "tests_passed": 2,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "03_string_strip_chars",
+          "passed": true,
+          "tests_passed": 4,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "04_dict_get_default",
+          "passed": true,
+          "tests_passed": 2,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "05_int_division",
+          "passed": true,
+          "tests_passed": 4,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "06_late_binding_closure",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "07_unicode_normalize",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "08_recursion_base_case",
+          "passed": true,
+          "tests_passed": 4,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "09_timezone_naive",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        },
+        {
+          "issue_id": "10_set_membership",
+          "passed": true,
+          "tests_passed": 3,
+          "tests_failed": 0,
+          "error_kind": null
+        }
+      ]
+    }
+  ]
+}

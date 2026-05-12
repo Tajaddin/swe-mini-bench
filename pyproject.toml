@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swe-mini-bench"
+version = "0.1.0"
+description = "Lightweight code-patch eval. 10 curated bugs, 3 agent strategies."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Tajaddin Gafarov", email = "gafarovtajaddin@gmail.com"}]
+keywords = ["llm", "swe-bench", "code-generation", "evaluation", "agent", "anthropic"]
+dependencies = [
+    "pydantic>=2.6",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.39"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+swe-mini-bench = "swe_mini_bench.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+swe_mini_bench = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

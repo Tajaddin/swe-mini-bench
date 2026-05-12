@@ -1,0 +1,1 @@
+`split_bill(1000, 3)` returns `[333, 333, 333]` — losing one cent. The function should distribute the rounding remainder across the first few payers so the sum exactly equals the total. Example: `split_bill(1000, 3)` should return `[334, 333, 333]` (sum = 1000).

@@ -1,0 +1,1 @@
+Calling `add_item("foo")` twice without an explicit list returns `["foo", "foo"]` on the second call — the function appears to remember state between calls. Each fresh invocation should start with an empty list.
