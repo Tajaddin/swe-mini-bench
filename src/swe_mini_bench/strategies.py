@@ -13,6 +13,7 @@ executes the patched body against the tests.
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 from typing import Protocol
@@ -86,13 +87,20 @@ _FENCE_RE = re.compile(
 
 
 def extract_python_block(text: str) -> str:
-    """Pull the first ```python ... ``` block out of a model response.
+    """Pull the last ```python ... ``` block out of a model response.
 
-    Falls back to the raw text if no fence is found (some models forget).
+    The last block, because reasoning before the answer often quotes snippets.
+    Without a fence, the raw text is used if it parses as Python (some models
+    forget the fence); otherwise the result is empty, which the runner reports
+    as ``no_code_block``.
     """
-    match = _FENCE_RE.search(text)
-    if match:
-        return match.group(1).rstrip() + "\n"
+    blocks = _FENCE_RE.findall(text)
+    if blocks:
+        return blocks[-1].rstrip() + "\n"
+    try:
+        ast.parse(text)
+    except SyntaxError:
+        return ""
     return text.strip() + "\n"
 
 
