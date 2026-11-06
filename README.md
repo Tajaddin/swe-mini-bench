@@ -129,12 +129,14 @@ PatchResult(
     passed=True,
     tests_passed=3, tests_failed=0,
     error_kind=None,
-    pytest_stdout="...", pytest_stderr="...",
-    pytest_exitcode=0,
-    sandbox="docker",
+    pytest_stdout="...\n1 failed, 3 passed, 1 xfailed in 0.52s\n", pytest_stderr="",
+    pytest_exitcode=1,
+    sandbox="local",
     patch="from typing import Callable\n\ndef make_multipliers...",
 )
 ```
+
+Every run includes the must-fail canary, so pytest exits 1 and its summary counts one failure even for a correct patch. Read `passed`, not the exit code or the printed summary.
 
 `error_kind` is `"syntax_error" | "import_error" | "test_failure" | "no_code_block" | "timeout" | "tampered" | None`. The JSON report keeps each patch, so any failure can be inspected after the run. This lets you distinguish "model produced unparseable code" from "model produced runnable but wrong code" — those are different failure modes with different fixes.
 
