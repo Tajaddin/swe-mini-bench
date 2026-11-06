@@ -1,22 +1,27 @@
 """Patch executor + benchmark loop.
 
-``run_one`` writes the agent's patch to a scratch tempdir, drops the test
-file next to it, runs pytest, and parses the output. ``bench`` runs every
-strategy over every issue and returns aggregated pass@1.
+``run_one`` asks a strategy for a patch, runs the issue's tests against it in a
+separate process (a network-less container when available, see
+:mod:`swe_mini_bench.sandbox`), and decides the verdict here, in the parent,
+from the per-test JUnit report. ``bench`` runs every strategy over every issue
+and returns aggregated pass@1.
+
+The patch's code has to run in the same interpreter as the tests that call it,
+so it can try to tamper with pytest. Two checks make that visible: every test
+the parent finds in the trusted test source must be reported as passed, and a
+canary test that must fail (strict xfail) must still be reported as failing.
 """
 
 from __future__ import annotations
 
-import json
-import re
-import subprocess
-import sys
-import tempfile
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
+import ast
+import uuid
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
 from typing import Iterable
 
 from swe_mini_bench.issues import Issue
+from swe_mini_bench.sandbox import execute
 from swe_mini_bench.strategies import AgentStrategy, Completion
 
 
@@ -30,47 +35,54 @@ class PatchResult:
     patch: str
     pytest_stdout: str
     pytest_stderr: str
-    pytest_exitcode: int
+    pytest_exitcode: int | None  # None when the run was killed at the timeout
     tests_passed: int = 0
     tests_failed: int = 0
-    error_kind: str | None = None  # syntax_error, no_code_block, test_failure, ok
+    # syntax_error, import_error, test_failure, no_code_block, timeout, tampered
+    error_kind: str | None = None
+    sandbox: str = ""
 
 
-_PASSED_RE = re.compile(r"(\d+)\s+passed")
-_FAILED_RE = re.compile(r"(\d+)\s+failed")
+_CANARY_SOURCE = """\
+import pytest
 
 
-def _parse_pytest_summary(stdout: str) -> tuple[int, int]:
-    """Parse the trailing 'N passed, M failed in ...s' line.
-
-    Works for both ``-q`` ("3 passed in 0.02s") and the default banner format
-    ("===== 3 passed in 0.02s =====").
-    """
-    passed = failed = 0
-    for line in stdout.splitlines():
-        stripped = line.strip().strip("=").strip()
-        if "in " not in stripped or "passed" not in stripped and "failed" not in stripped:
-            continue
-        if "passed" in stripped or "failed" in stripped:
-            p = _PASSED_RE.search(stripped)
-            f = _FAILED_RE.search(stripped)
-            if p:
-                passed = int(p.group(1))
-            if f:
-                failed = int(f.group(1))
-    return passed, failed
+@pytest.mark.xfail(strict=True)
+def {name}():
+    assert False
+"""
 
 
-def _classify_error(patch: str, exitcode: int, stdout: str, stderr: str) -> str | None:
-    if exitcode == 0:
-        return None
-    if "SyntaxError" in stderr or "SyntaxError" in stdout:
-        return "syntax_error"
-    if "ImportError" in stderr or "ImportError" in stdout:
-        return "import_error"
-    if not patch.strip():
-        return "no_code_block"
-    return "test_failure"
+def _expected_tests(test_code: str) -> list[str]:
+    """Top-level test functions in the issue's test file, read without running it."""
+    return [
+        node.name
+        for node in ast.parse(test_code).body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
+    ]
+
+
+def _junit_outcomes(junit_xml: str | None) -> dict[tuple[str, str], str]:
+    """Map (classname, name) to passed / failed / error / skipped / xfailed."""
+    if not junit_xml:
+        return {}
+    try:
+        root = ET.fromstring(junit_xml)
+    except ET.ParseError:
+        return {}
+    outcomes: dict[tuple[str, str], str] = {}
+    for case in root.iter("testcase"):
+        tags = {child.tag: child for child in case}
+        if "failure" in tags:
+            outcome = "failed"
+        elif "error" in tags:
+            outcome = "error"
+        elif "skipped" in tags:
+            outcome = "xfailed" if tags["skipped"].get("type") == "pytest.xfail" else "skipped"
+        else:
+            outcome = "passed"
+        outcomes[(case.get("classname", ""), case.get("name", ""))] = outcome
+    return outcomes
 
 
 def run_one(
@@ -79,45 +91,77 @@ def run_one(
     llm: Completion,
     *,
     pytest_args: Iterable[str] = (),
+    sandbox: str = "auto",
+    timeout_s: float = 60,
 ) -> PatchResult:
     """Run ``strategy`` against ``issue``, return the verdict."""
     patch = strategy.solve(issue, llm)
+    expected = _expected_tests(issue.test_code)
 
-    with tempfile.TemporaryDirectory(prefix=f"swe_{issue.id}_") as td:
-        sandbox = Path(td)
-        (sandbox / f"{issue.module_name}.py").write_text(patch, encoding="utf-8")
-        (sandbox / f"{issue.test_module_name}.py").write_text(
-            issue.test_code, encoding="utf-8"
-        )
-        proc = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-q",
-                "--tb=short",
-                *pytest_args,
-                str(sandbox),
-            ],
-            cwd=sandbox,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        passed_n, failed_n = _parse_pytest_summary(proc.stdout)
-        err_kind = _classify_error(patch, proc.returncode, proc.stdout, proc.stderr)
+    if not patch.strip():
         return PatchResult(
             strategy=strategy.name,
             issue_id=issue.id,
-            passed=(proc.returncode == 0 and failed_n == 0 and passed_n > 0),
+            passed=False,
             patch=patch,
-            pytest_stdout=proc.stdout,
-            pytest_stderr=proc.stderr,
-            pytest_exitcode=proc.returncode,
-            tests_passed=passed_n,
-            tests_failed=failed_n,
-            error_kind=err_kind,
+            pytest_stdout="",
+            pytest_stderr="",
+            pytest_exitcode=None,
+            tests_failed=len(expected),
+            error_kind="no_code_block",
         )
+
+    canary = f"test_canary_{uuid.uuid4().hex}"
+    run = execute(
+        {
+            f"{issue.module_name}.py": patch,
+            f"{issue.test_module_name}.py": issue.test_code,
+            f"{canary}.py": _CANARY_SOURCE.format(name=canary),
+            # Stops pytest from picking up config or conftest files above the run directory.
+            "pytest.ini": "[pytest]\n",
+        },
+        sandbox=sandbox,
+        timeout_s=timeout_s,
+        pytest_args=pytest_args,
+    )
+
+    outcomes = _junit_outcomes(run.junit_xml)
+    n_passed = sum(outcomes.get((issue.test_module_name, t)) == "passed" for t in expected)
+    canary_outcome = outcomes.get((canary, canary))
+    passed = (
+        not run.timed_out
+        and bool(expected)
+        and n_passed == len(expected)
+        and canary_outcome == "xfailed"
+    )
+
+    output = run.stdout + run.stderr
+    if passed:
+        error_kind = None
+    elif run.timed_out:
+        error_kind = "timeout"
+    elif "SyntaxError" in output:
+        error_kind = "syntax_error"
+    elif "ImportError" in output:
+        error_kind = "import_error"
+    elif canary_outcome is not None and canary_outcome != "xfailed":
+        error_kind = "tampered"
+    else:
+        error_kind = "test_failure"
+
+    return PatchResult(
+        strategy=strategy.name,
+        issue_id=issue.id,
+        passed=passed,
+        patch=patch,
+        pytest_stdout=run.stdout,
+        pytest_stderr=run.stderr,
+        pytest_exitcode=run.exitcode,
+        tests_passed=n_passed,
+        tests_failed=len(expected) - n_passed,
+        error_kind=error_kind,
+        sandbox=run.sandbox,
+    )
 
 
 @dataclass
@@ -133,11 +177,13 @@ def run_strategy(
     issues: list[Issue],
     strategy: AgentStrategy,
     llm: Completion,
+    *,
+    sandbox: str = "auto",
 ) -> StrategySummary:
     results: list[PatchResult] = []
     n_pass = 0
     for issue in issues:
-        result = run_one(issue, strategy, llm)
+        result = run_one(issue, strategy, llm, sandbox=sandbox)
         results.append(result)
         if result.passed:
             n_pass += 1
@@ -163,10 +209,12 @@ def bench(
     issues: list[Issue],
     strategies: list[AgentStrategy],
     llm: Completion,
+    *,
+    sandbox: str = "auto",
 ) -> BenchReport:
     summaries: list[StrategySummary] = []
     for strategy in strategies:
-        summaries.append(run_strategy(issues, strategy, llm))
+        summaries.append(run_strategy(issues, strategy, llm, sandbox=sandbox))
     return BenchReport(
         model=llm.model,
         summaries=summaries,
