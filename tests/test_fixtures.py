@@ -6,6 +6,9 @@ For every fixture:
   isn't actually demonstrated and an LLM "fixing" nothing would still pass).
 * the canonical fix listed in ``CANONICAL_FIXES`` must PASS all tests
   (otherwise our reference solution is wrong).
+* pytest must report exactly the top-level test functions the runner finds
+  in the source (otherwise a test class or a parametrized test would never
+  count as passed).
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from swe_mini_bench.issues import load_issues
+from swe_mini_bench.runner import _expected_tests, _junit_outcomes
 
 
 # A minimal known-good patch for each issue. Used by the bench-validation test;
@@ -96,25 +100,28 @@ def filter_blocked(events: list[dict], blocked_ids: list[int]) -> list[dict]:
 }
 
 
-def _run_pytest(module_src: str, test_src: str) -> tuple[int, str, str]:
+def _run_pytest(module_src: str, test_src: str) -> tuple[int, str, str, str | None]:
     with tempfile.TemporaryDirectory() as td:
         sandbox = Path(td)
         (sandbox / "module.py").write_text(module_src, encoding="utf-8")
         (sandbox / "test_module.py").write_text(test_src, encoding="utf-8")
+        (sandbox / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+        report = sandbox / "report.xml"
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "--tb=line", str(sandbox)],
+            [sys.executable, "-m", "pytest", "-q", "--tb=line", f"--junitxml={report}", str(sandbox)],
             cwd=sandbox,
             capture_output=True,
             text=True,
             timeout=60,
         )
-        return proc.returncode, proc.stdout, proc.stderr
+        junit = report.read_text(encoding="utf-8") if report.is_file() else None
+        return proc.returncode, proc.stdout, proc.stderr, junit
 
 
 @pytest.mark.parametrize("issue", load_issues(), ids=lambda i: i.id)
 def test_buggy_code_fails(issue):
     """The shipped buggy module must fail at least one of its tests."""
-    code, _, _ = _run_pytest(issue.buggy_code, issue.test_code)
+    code, _, _, _ = _run_pytest(issue.buggy_code, issue.test_code)
     assert code != 0, (
         f"{issue.id}: buggy module passes its tests — the fixture is broken"
     )
@@ -122,8 +129,15 @@ def test_buggy_code_fails(issue):
 
 @pytest.mark.parametrize("issue", load_issues(), ids=lambda i: i.id)
 def test_canonical_fix_passes(issue):
-    """The canonical fix must pass every test."""
-    code, stdout, stderr = _run_pytest(CANONICAL_FIXES[issue.id], issue.test_code)
+    """The canonical fix must pass every test, and the runner must see every test."""
+    code, stdout, stderr, junit = _run_pytest(CANONICAL_FIXES[issue.id], issue.test_code)
     assert code == 0, (
         f"{issue.id}: canonical fix fails its own tests.\n{stdout}\n{stderr}"
+    )
+    reported = sorted(
+        name for (cls, name) in _junit_outcomes(junit) if cls.split(".")[0] == "test_module"
+    )
+    assert reported == sorted(_expected_tests(issue.test_code)), (
+        f"{issue.id}: pytest reports tests the runner cannot match by name "
+        "(use plain top-level test functions, no classes or parametrize)"
     )
