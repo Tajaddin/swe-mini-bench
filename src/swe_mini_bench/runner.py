@@ -6,10 +6,16 @@ separate process (a network-less container when available, see
 from the per-test JUnit report. ``bench`` runs every strategy over every issue
 and returns aggregated pass@1.
 
-The patch's code has to run in the same interpreter as the tests that call it,
-so it can try to tamper with pytest. Two checks make that visible: every test
-the parent finds in the trusted test source must be reported as passed, and a
-canary test that must fail (strict xfail) must still be reported as failing.
+Every test the parent finds in the trusted test source must be reported as
+passed, and two canary tests must keep their outcome: a plain failing test must
+be reported failed and a strict xfail test xfailed. That catches a patch that
+changes every test's outcome alike, such as disabling test execution or
+rewriting failures as passes.
+
+It does not make the verdict tamper-proof. The patch's code runs in the same
+interpreter as the tests that call it, and that process writes the JUnit
+report, so a patch written against this harness (one that leaves the canaries
+alone, say) can still forge a pass.
 """
 
 from __future__ import annotations
@@ -47,8 +53,12 @@ _CANARY_SOURCE = """\
 import pytest
 
 
+def {name}_fail():
+    assert False, "canary: must be reported as failed"
+
+
 @pytest.mark.xfail(strict=True)
-def {name}():
+def {name}_xfail():
     assert False
 """
 
@@ -127,12 +137,16 @@ def run_one(
 
     outcomes = _junit_outcomes(run.junit_xml)
     n_passed = sum(outcomes.get((issue.test_module_name, t)) == "passed" for t in expected)
-    canary_outcome = outcomes.get((canary, canary))
+    canaries = (
+        outcomes.get((canary, f"{canary}_fail")),
+        outcomes.get((canary, f"{canary}_xfail")),
+    )
+    canaries_held = canaries == ("failed", "xfailed")
     passed = (
         not run.timed_out
         and bool(expected)
         and n_passed == len(expected)
-        and canary_outcome == "xfailed"
+        and canaries_held
     )
 
     output = run.stdout + run.stderr
@@ -144,7 +158,7 @@ def run_one(
         error_kind = "syntax_error"
     elif "ImportError" in output:
         error_kind = "import_error"
-    elif canary_outcome is not None and canary_outcome != "xfailed":
+    elif canaries != (None, None) and not canaries_held:
         error_kind = "tampered"
     else:
         error_kind = "test_failure"

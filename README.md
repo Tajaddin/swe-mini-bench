@@ -2,7 +2,7 @@
 
 > Lightweight code-patch eval. 10 curated Python bugs, 3 agent strategies (zero-shot → scratchpad → scratchpad+self-critique), real Claude Haiku 4.5 numbers. Each strategy's failures are categorised by **error kind** (`syntax_error`, `test_failure`, `no_code_block`) so the gain from extra scaffolding is auditable.
 
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Tests](https://img.shields.io/badge/tests-39%20passing-brightgreen)](#tests) [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Tests](https://img.shields.io/badge/tests-40%20passing-brightgreen)](#tests) [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 
 ## Why
 
@@ -116,9 +116,9 @@ For one `(strategy, issue)` pair:
 3. Runs `pytest -q --tb=short` there in a separate process, with a 60 s timeout:
    * **Docker** when the `swe-mini-bench-sandbox` image is built: `--network none`, read-only root filesystem and inputs, all capabilities dropped, memory and process limits, unprivileged user.
    * **Local subprocess** otherwise: same interpreter, an environment stripped to `PATH`, temp-dir and a few OS variables (so the patch cannot read `ANTHROPIC_API_KEY`), but with network and file access. Choose with `--sandbox auto|docker|local`.
-4. Decides the verdict in the parent process from pytest's JUnit report, not from the exit code or printed summary: every test function the parent finds in the trusted `test_module.py` must be reported passed, and the canary, a strict `xfail` test that must fail, must still be reported as failing. A patch that disables pytest makes the canary pass and is graded `tampered`.
+4. Decides the verdict in the parent process from pytest's JUnit report, not from the exit code or printed summary: every test function the parent finds in the trusted `test_module.py` must be reported passed, and two canary tests must keep their outcome, a plain failing test reported as failed and a strict `xfail` test as xfailed. A patch that stops tests from running, or that rewrites every failure as a pass, flips a canary and is graded `tampered`.
 
-The patch has to run in the same interpreter as the tests that call it, so these checks stop generic tampering (patching pytest, exiting early, printing a fake summary), not a patch written against this harness, for example one returning objects whose `__eq__` is always true. Use the Docker sandbox for models you do not trust.
+**The verdict is not tamper-proof.** The patch runs in the same interpreter as the tests that call it, and that process writes the JUnit report the parent reads. The canaries only catch tampering that changes every test's outcome alike. A patch written against this harness can still score a pass: one that runs the canaries and skips every other test (kept in `tests/test_runner.py` as an expected failure), or one that returns objects whose `__eq__` is always true. Neither sandbox changes this, so read the saved patches before trusting a pass from a model you do not trust.
 
 A `PatchResult` looks like:
 
@@ -148,11 +148,11 @@ Four files:
 
 * **`tests/test_fixtures.py`** — for each of the 10 issues, runs pytest against the buggy code (must fail) and the canonical fix (must pass). 20 parameterised cases.
 * **`tests/test_strategies.py`** — covers the prompt extractor, all 3 strategies with mock LLMs, and the runner's failure-classification logic. 9 unit cases.
-* **`tests/test_runner.py`** — adversarial patches: one that disables pytest, one that forges a summary and exits early, one that hangs, one that reads the environment, a prose-only answer, plus a correct patch and the saved patch. 7 cases.
+* **`tests/test_runner.py`** — adversarial patches: one that disables pytest, one that rewrites failures as passes, one that forges a summary and exits early, one that hangs, one that reads the environment, a prose-only answer, plus a correct patch and the saved patch. 8 cases, and the known bypass above pinned as an expected failure.
 * **`tests/test_sandbox.py`** — the Docker command line and the local fallback. 3 cases.
 
 ```
-39 passed in 22.14s
+40 passed, 1 xfailed
 ```
 
 ## Bring-your-own LLM

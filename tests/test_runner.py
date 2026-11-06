@@ -1,7 +1,13 @@
-"""Runner tests with adversarial patches: the verdict must not be forgeable
-by the patch's own process, and no patch may crash the benchmark."""
+"""Runner tests with adversarial patches.
+
+The patch runs in the same process as pytest, so the canaries catch only
+tampering that changes every test's outcome alike; a patch written against
+this harness can still forge a pass, pinned below as an expected failure.
+No patch may crash the benchmark."""
 
 from __future__ import annotations
+
+import pytest
 
 from swe_mini_bench import MockCompletion, ZeroShot, bench, load_issues, run_one
 from swe_mini_bench.runner import report_to_dict
@@ -31,6 +37,44 @@ def test_patch_that_disables_pytest_is_caught():
     result = _run(hack)
     assert not result.passed
     assert result.error_kind == "tampered"
+
+
+def test_patch_that_reports_failures_as_passes_is_caught():
+    # Knows nothing about this harness: every failed report becomes a pass.
+    hack = (
+        "import _pytest.reports\n"
+        "_init = _pytest.reports.TestReport.__init__\n"
+        "def _forge(self, *args, **kwargs):\n"
+        "    _init(self, *args, **kwargs)\n"
+        "    if self.outcome == 'failed':\n"
+        "        self.outcome, self.longrepr = 'passed', None\n"
+        "_pytest.reports.TestReport.__init__ = _forge\n\n"
+        "def inclusive_range(start, end):\n"
+        "    return None\n"
+    )
+    result = _run(hack)
+    assert not result.passed
+    assert result.error_kind == "tampered"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="known bypass: the patch runs in pytest's own process, so a patch that "
+    "leaves the canaries alone can forge the verdict",
+)
+def test_patch_that_spares_the_canaries_cannot_forge_a_pass():
+    hack = (
+        "import _pytest.python\n"
+        "_runtest = _pytest.python.Function.runtest\n"
+        "def _skip_all_but_canaries(self):\n"
+        "    if self.name.startswith('test_canary_'):\n"
+        "        _runtest(self)\n"
+        "_pytest.python.Function.runtest = _skip_all_but_canaries\n\n"
+        "def inclusive_range(start, end):\n"
+        "    return None\n"
+    )
+    result = _run(hack)
+    assert not result.passed
 
 
 def test_forged_summary_and_early_exit_is_not_a_pass():
