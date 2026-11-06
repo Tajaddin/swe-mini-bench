@@ -2,7 +2,7 @@
 
 > Lightweight code-patch eval. 10 curated Python bugs, 3 agent strategies (zero-shot → scratchpad → scratchpad+self-critique), real Claude Haiku 4.5 numbers. Each strategy's failures are categorised by **error kind** (`syntax_error`, `test_failure`, `no_code_block`) so the gain from extra scaffolding is auditable.
 
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Tests](https://img.shields.io/badge/tests-31%20passing-brightgreen)](#tests) [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Tests](https://img.shields.io/badge/tests-39%20passing-brightgreen)](#tests) [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 
 ## Why
 
@@ -12,7 +12,7 @@ Use it to:
 
 * Compare two LLMs *qualitatively* on code-patching before paying for a SWE-bench run.
 * Validate a new agent strategy (scratchpad? self-critique? tool use?) end-to-end on the same denominator.
-* Diagnose **why** patches fail — the runner classifies every failure as `syntax_error`, `test_failure`, `no_code_block`, or `import_error`.
+* Diagnose **why** patches fail — the runner classifies every failure as `syntax_error`, `import_error`, `test_failure`, `no_code_block`, `timeout`, or `tampered`.
 
 It is not a replacement for SWE-bench. The bugs are small and self-contained; an LLM that aces this can still fail at large-repo navigation.
 
@@ -23,12 +23,12 @@ It is not a replacement for SWE-bench. The bugs are small and self-contained; an
 | Strategy | pass@1 | Calls per fix | Notes |
 |---|---:|---:|---|
 | `zero_shot` | **10/10 (100%)** | 1 | Single call, "return the fixed file." |
-| `scratchpad` | **9/10 (90%)** | 1 | Regressed on `06_late_binding_closure` — the model talked itself into a wrong fix while writing reasoning. |
+| `scratchpad` | **9/10 (90%)** | 1 | Missed `06_late_binding_closure` with 0 tests passed and 0 failed, so its tests never ran. See the note below. |
 | `scratchpad_critique` | **10/10 (100%)** | 2 | Self-review catches the scratchpad regression, but doubles cost. |
 
-The surprise is the **scratchpad regression**: adding a reasoning slot caused Haiku to fail a problem it solved cleanly zero-shot. Self-critique recovers it, but only by paying for a second LLM call.
+**Note on these numbers.** They come from the runner as it was before 2026-11-06, which graded the *first* code block of each answer. Scratchpad answers write reasoning before the code and can quote snippets in it, and a quoted snippet that fails at import (say, one using a name defined elsewhere in the file) gives exactly this 0-passed, 0-failed result, so the `06` miss may be the extractor, not the model. The run did not save patches, so this cannot be checked, and the table has not been re-run since the runner was fixed (last code block, sandboxed run, parent-side verdict, saved patches). Re-run `python bench/run_anthropic.py` before drawing conclusions about scratchpad vs zero-shot.
 
-For 10/10 baseline, the takeaway is that Haiku 4.5 is genuinely strong on small, well-described single-file bugs. **The discriminator isn't the headline pass rate — it's the failure-mode evidence that more scaffolding ≠ always better.** A larger fixture set (50+) would tighten the interval; on this corpus, scratchpad alone is strictly dominated by zero-shot at 1× cost and by scratchpad+critique at 2× cost.
+What the run does show: Haiku 4.5 is strong on small, well-described single-file bugs (10/10 zero-shot). A larger fixture set (50+) would be needed to separate the strategies.
 
 Raw output: [`bench/anthropic_results.json`](bench/anthropic_results.json). Reproduce with the command above. Cost per full run: under $0.05 on Haiku.
 
@@ -65,7 +65,7 @@ from swe_mini_bench import ZeroShot, Scratchpad, ScratchpadCritique
 | `Scratchpad` | 1 | Same prompt + a system message and inline instruction to write reasoning before the code block. |
 | `ScratchpadCritique` | 2 | First call = scratchpad. Second call shows the model its own first attempt and asks it to review against the failing tests, returning only the corrected file. |
 
-All three end with `extract_python_block(text)` which pulls the first ```` ```python ```` fence (or falls back to raw text if the model forgot).
+All three end with `extract_python_block(text)`, which takes the last ```` ```python ```` fence, so code quoted in the reasoning is skipped. Without a fence it uses the raw text only if it parses as Python; otherwise the patch is empty and graded `no_code_block`.
 
 ### Why three strategies, not fifteen
 
@@ -83,6 +83,9 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 # Validate the fixtures (no LLM calls):
 pytest
+
+# Optional: build the sandbox image so patches run in Docker with no network:
+docker build -t swe-mini-bench-sandbox sandbox/
 
 # Run the real benchmark:
 python bench/run_anthropic.py
@@ -108,10 +111,14 @@ for s in report.summaries:
 
 For one `(strategy, issue)` pair:
 
-1. Strategy returns a string (the patched file body).
-2. Runner writes the body to `<tmp>/module.py` and the issue's tests to `<tmp>/test_module.py`.
-3. Runs `pytest -q --tb=short` in the tempdir.
-4. Parses `=== N passed, M failed ===`, classifies the failure (if any), and records the exit code.
+1. Strategy returns a string (the patched file body). An empty patch is graded `no_code_block` without running anything.
+2. Runner writes the body to `module.py`, the issue's tests to `test_module.py`, a canary test, and an empty `pytest.ini` into a fresh directory.
+3. Runs `pytest -q --tb=short` there in a separate process, with a 60 s timeout:
+   * **Docker** when the `swe-mini-bench-sandbox` image is built: `--network none`, read-only root filesystem and inputs, all capabilities dropped, memory and process limits, unprivileged user.
+   * **Local subprocess** otherwise: same interpreter, an environment stripped to `PATH`, temp-dir and a few OS variables (so the patch cannot read `ANTHROPIC_API_KEY`), but with network and file access. Choose with `--sandbox auto|docker|local`.
+4. Decides the verdict in the parent process from pytest's JUnit report, not from the exit code or printed summary: every test function the parent finds in the trusted `test_module.py` must be reported passed, and the canary, a strict `xfail` test that must fail, must still be reported as failing. A patch that disables pytest makes the canary pass and is graded `tampered`.
+
+The patch has to run in the same interpreter as the tests that call it, so these checks stop generic tampering (patching pytest, exiting early, printing a fake summary), not a patch written against this harness, for example one returning objects whose `__eq__` is always true. Use the Docker sandbox for models you do not trust.
 
 A `PatchResult` looks like:
 
@@ -124,11 +131,12 @@ PatchResult(
     error_kind=None,
     pytest_stdout="...", pytest_stderr="...",
     pytest_exitcode=0,
+    sandbox="docker",
     patch="from typing import Callable\n\ndef make_multipliers...",
 )
 ```
 
-`error_kind` is `"syntax_error" | "import_error" | "test_failure" | "no_code_block" | None`. This lets you distinguish "model produced unparseable code" from "model produced runnable but wrong code" — those are different failure modes with different fixes.
+`error_kind` is `"syntax_error" | "import_error" | "test_failure" | "no_code_block" | "timeout" | "tampered" | None`. The JSON report keeps each patch, so any failure can be inspected after the run. This lets you distinguish "model produced unparseable code" from "model produced runnable but wrong code" — those are different failure modes with different fixes.
 
 ## Tests
 
@@ -136,13 +144,15 @@ PatchResult(
 pytest
 ```
 
-Two suites:
+Four files:
 
 * **`tests/test_fixtures.py`** — for each of the 10 issues, runs pytest against the buggy code (must fail) and the canonical fix (must pass). 20 parameterised cases.
-* **`tests/test_strategies.py`** — covers the prompt extractor, all 3 strategies with mock LLMs, and the runner's failure-classification logic. 7 unit cases.
+* **`tests/test_strategies.py`** — covers the prompt extractor, all 3 strategies with mock LLMs, and the runner's failure-classification logic. 9 unit cases.
+* **`tests/test_runner.py`** — adversarial patches: one that disables pytest, one that forges a summary and exits early, one that hangs, one that reads the environment, a prose-only answer, plus a correct patch and the saved patch. 7 cases.
+* **`tests/test_sandbox.py`** — the Docker command line and the local fallback. 3 cases.
 
 ```
-27 passed in 40.6s
+39 passed in 22.14s
 ```
 
 ## Bring-your-own LLM
@@ -166,9 +176,11 @@ Wrap OpenAI / Groq / Bedrock / vLLM with a similar adapter and pass it to `bench
 │   ├── issues.py        # Issue dataclass + load_issues()
 │   ├── strategies.py    # ZeroShot / Scratchpad / ScratchpadCritique + Completion protocol
 │   ├── runner.py        # PatchResult, run_one, run_strategy, bench, report_to_dict
+│   ├── sandbox.py       # runs pytest in Docker (no network) or a stripped local subprocess
 │   └── cli.py           # `swe-mini-bench {list,run}` Click CLI
 ├── issues/              # 10 fixture subdirs (ISSUE.md + module.py + test_module.py)
-├── tests/               # fixture sanity + strategy unit tests
+├── tests/               # fixture sanity, strategy, runner and sandbox tests
+├── sandbox/Dockerfile   # image for the Docker sandbox
 └── bench/
     ├── run_anthropic.py
     └── anthropic_results.json
@@ -182,7 +194,7 @@ Wrap OpenAI / Groq / Bedrock / vLLM with a similar adapter and pass it to `bench
 
 **Bench size is 10.** Confidence intervals on 10 are wide. The headline is the per-strategy *direction of change*, not a calibrated point estimate. For statistical claims, expand to several hundred fixtures.
 
-**Patch parsing assumes ```python``` fences.** Models that emit unfenced code (rare on Haiku and above) are handled by a fallback that uses the raw text, but error-checked structures (diff format, line-anchored patches) would need a different extractor.
+**Patch parsing assumes ```python``` fences.** Models that emit unfenced code (rare on Haiku and above) are handled by a fallback that uses the raw text when it parses as Python, but error-checked structures (diff format, line-anchored patches) would need a different extractor.
 
 ## License
 
