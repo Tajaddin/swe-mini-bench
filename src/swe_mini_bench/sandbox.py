@@ -21,8 +21,10 @@ SANDBOX_IMAGE = "swe-mini-bench-sandbox"
 PYTEST_FLAGS = ("-q", "--tb=short", "-p", "no:cacheprovider")
 MAX_REPORT_BYTES = 2_000_000
 
-# The local fallback passes only these through, so a patch cannot read API keys
-# or other secrets from the benchmark's environment.
+# The local fallback passes only these through, so the child does not inherit API
+# keys or other secrets in its environment. That is not isolation: the child runs
+# as the same user and can still read the parent's /proc/<pid>/environ on Linux
+# and files in the home directory.
 _LOCAL_ENV_KEEP = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "TMPDIR", "LANG")
 
 

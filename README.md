@@ -84,7 +84,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # Validate the fixtures (no LLM calls):
 pytest
 
-# Optional: build the sandbox image so patches run in Docker with no network:
+# Optional, untested: build the sandbox image so patches run in Docker with no network:
 docker build -t swe-mini-bench-sandbox sandbox/
 
 # Run the real benchmark:
@@ -114,8 +114,8 @@ For one `(strategy, issue)` pair:
 1. Strategy returns a string (the patched file body). An empty patch is graded `no_code_block` without running anything.
 2. Runner writes the body to `module.py`, the issue's tests to `test_module.py`, a canary test, and an empty `pytest.ini` into a fresh directory.
 3. Runs `pytest -q --tb=short` there in a separate process, with a 60 s timeout:
-   * **Docker** when the `swe-mini-bench-sandbox` image is built: `--network none`, read-only root filesystem and inputs, all capabilities dropped, memory and process limits, unprivileged user.
-   * **Local subprocess** otherwise: same interpreter, an environment stripped to `PATH`, temp-dir and a few OS variables (so the patch cannot read `ANTHROPIC_API_KEY`), but with network and file access. Choose with `--sandbox auto|docker|local`.
+   * **Docker** when the `swe-mini-bench-sandbox` image is built: `--network none`, read-only root filesystem and inputs, all capabilities dropped, memory and process limits, unprivileged user. **Untested:** the image has not been built or run as part of this project; only the `docker run` command line is unit-tested. It is meant to protect the host (network, files, environment), not the verdict: the patch still runs inside pytest, which writes its report to a writable mount.
+   * **Local subprocess** otherwise: same interpreter, with network and file access, and an environment stripped to `PATH`, temp-dir and a few OS variables, so `ANTHROPIC_API_KEY` is not passed to the child. That is not isolation: the patch runs as your user, so it can still read the key from the parent's `/proc/<pid>/environ` on Linux or from files in your home directory. Choose with `--sandbox auto|docker|local`.
 4. Decides the verdict in the parent process from pytest's JUnit report, not from the exit code or printed summary: every test function the parent finds in the trusted `test_module.py` must be reported passed, and two canary tests must keep their outcome, a plain failing test reported as failed and a strict `xfail` test as xfailed. A patch that stops tests from running, or that rewrites every failure as a pass, flips a canary and is graded `tampered`.
 
 **The verdict is not tamper-proof.** The patch runs in the same interpreter as the tests that call it, and that process writes the JUnit report the parent reads. The canaries only catch tampering that changes every test's outcome alike. A patch written against this harness can still score a pass: one that runs the canaries and skips every other test (kept in `tests/test_runner.py` as an expected failure), or one that returns objects whose `__eq__` is always true. Neither sandbox changes this, so read the saved patches before trusting a pass from a model you do not trust.
