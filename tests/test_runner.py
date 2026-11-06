@@ -3,7 +3,8 @@ by the patch's own process, and no patch may crash the benchmark."""
 
 from __future__ import annotations
 
-from swe_mini_bench import MockCompletion, ZeroShot, load_issues, run_one
+from swe_mini_bench import MockCompletion, ZeroShot, bench, load_issues, run_one
+from swe_mini_bench.runner import report_to_dict
 
 ISSUE = {i.id: i for i in load_issues()}["01_off_by_one_range"]
 FIX = "def inclusive_range(start: int, end: int) -> list[int]:\n    return list(range(start, end + 1))\n"
@@ -68,3 +69,10 @@ def test_prose_only_answer_is_no_code_block():
     assert not result.passed
     assert result.error_kind == "no_code_block"
 
+
+def test_report_keeps_each_patch():
+    report = bench([ISSUE], [ZeroShot()], MockCompletion(lambda p, s: f"```python\n{FIX}```"))
+    (row,) = report_to_dict(report)["summaries"][0]["results"]
+    assert row["passed"] is True
+    assert row["patch"] == FIX
+    assert row["sandbox"] in ("docker", "local")

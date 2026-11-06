@@ -239,6 +239,8 @@ def report_to_dict(report: BenchReport) -> dict:
                         "tests_passed": r.tests_passed,
                         "tests_failed": r.tests_failed,
                         "error_kind": r.error_kind,
+                        "sandbox": r.sandbox,
+                        "patch": r.patch,
                     }
                     for r in s.results
                 ],
