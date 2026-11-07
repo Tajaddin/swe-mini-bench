@@ -44,7 +44,13 @@ def list_issues_cmd():
     type=click.Choice(["zero_shot", "scratchpad", "scratchpad_critique"]),
     default=("zero_shot", "scratchpad", "scratchpad_critique"),
 )
-def run(model, out, strategy):
+@click.option(
+    "--sandbox",
+    type=click.Choice(["auto", "docker", "local"]),
+    default="auto",
+    help="Where patches run: docker (no network), local, or auto (docker once the image is built).",
+)
+def run(model, out, strategy, sandbox):
     """Run the full benchmark with Anthropic Haiku 4.5."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         click.echo("ANTHROPIC_API_KEY not set", err=True)
@@ -61,7 +67,7 @@ def run(model, out, strategy):
     click.echo(
         f"Running {len(strategies)} strategies × {len(issues)} issues on {llm.model}..."
     )
-    report = bench(issues, strategies, llm)
+    report = bench(issues, strategies, llm, sandbox=sandbox)
     out_path = Path(out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report_to_dict(report), indent=2), encoding="utf-8")

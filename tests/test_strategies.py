@@ -108,3 +108,16 @@ def test_runner_marks_syntax_error():
     result = run_one(issue, ZeroShot(), llm)
     assert not result.passed
     assert result.error_kind in {"syntax_error", "import_error"}
+
+
+def test_extract_python_block_takes_the_last_fence():
+    # Reasoning often quotes a line of the buggy file before the final answer.
+    text = (
+        "The bug is here:\n```python\nreturn list(range(start, end))\n```\n"
+        "Fixed file:\n```python\ndef f():\n    return 1\n```\n"
+    )
+    assert extract_python_block(text) == "def f():\n    return 1\n"
+
+
+def test_extract_python_block_drops_prose_without_a_fence():
+    assert extract_python_block("Sorry, I can't produce a fix for this.") == ""
